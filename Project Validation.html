@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Validation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .date-time, .last-used {
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 24px;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input[type="text"], input[type="number"], input[type="submit"], input[type="button"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f8f8;
+        }
+        .highlight {
+            font-size: 1.5em; /* Increase the font size */
+            color: red; /* Set the text color to red */
+            font-weight: bold; /* Make it bold */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="date-time" id="currentDateTime"></div>
+    <div class="last-used" id="lastUsedTime">Last used: Never</div>
+
+    <h1>Product Validation</h1>
+    
+    <label for="projectName">Project Name:</label>
+    <span id="projectNameHighlight" class="highlight">Project Name:</span>
+    <input type="text" id="projectName" placeholder="Enter Project Name" required>
+
+    <label for="customerName">Customer:</label>
+    <input type="text" id="customerName" placeholder="Enter Customer Name" required>
+
+    <form id="productForm">
+        <label for="productName">Product Name:</label>
+        <input list="productList" id="productName" name="productName" required>
+        <datalist id="productList"></datalist>
+
+        <label for="quantity">Quantity:</label>
+        <input type="number" id="quantity" name="quantity" required min="1">
+
+        <label for="barcode">Barcode:</label>
+        <input type="text" id="barcode" name="barcode" required pattern="\d{1,13}" title="Please enter a numeric barcode (1 to 13 digits)" maxlength="13">
+
+        <input type="submit" value="Add Product">
+        <input type="button" value="Reset" id="resetButton">
+        <div class="error" id="error-message" style="display: none;"></div>
+    </form>
+
+    <h2>Entry Records</h2>
+    <button class="btn print-btn" id="printButton">Print Records</button>
+    <table id="entryRecords">
+        <thead>
+            <tr>
+                <th>SR. No.</th>
+                <th>Product Name</th>
+                <th>Quantity</th>
+                <th>Barcode</th>
+                <th>Date Added</th>
+                <th>Last Updated</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Entry records will be populated here -->
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="2">Total Quantity:</td>
+                <td colspan="5" id="totalQuantity">0</td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <script>
+        const productList = document.getElementById('productList');
+        const productForm = document.getElementById('productForm');
+        const entryRecords = document.getElementById('entryRecords').getElementsByTagName('tbody')[0];
+        const errorMessage = document.getElementById('error-message');
+        const resetButton = document.getElementById('resetButton');
+        const printButton = document.getElementById('printButton');
+        const totalQuantityCell = document.getElementById('totalQuantity');
+        const currentDateTime = document.getElementById('currentDateTime');
+        const lastUsedTime = document.getElementById('lastUsedTime');
+        const projectNameInput = document.getElementById('projectName');
+        const customerNameInput = document.getElementById('customerName');
+
+        const PASSWORD = '4321'; // Predefined password for actions
+        let db;
+
+        // Initialize IndexedDB
+        function initDB() {
+            const request = indexedDB.open('productDB', 1);
+            request.onupgradeneeded = function(event) {
+                db = event.target.result;
+                const objectStore = db.createObjectStore('products', { keyPath: 'id', autoIncrement: true });
+                objectStore.createIndex('barcode', 'barcode', { unique: true });
+            };
+            request.onsuccess = function(event) {
+                db = event.target.result;
+                loadProducts();
+            };
+            request.onerror = function(event) {
+                console.error('Database error: ', event.target.error);
+            };
+        }
+
+        // Load products from IndexedDB
+        function loadProducts() {
+            const transaction = db.transaction(['products'], 'readonly');
+            const objectStore = transaction.objectStore('products');
+            const request = objectStore.getAll();
+
+            request.onsuccess = function(event) {
+                const products = event.target.result;
+                products.forEach(product => {
+                    const option = document.createElement('option');
+                    option.value = product.name;
+                    productList.appendChild(option);
+                });
+                displayRecords(products);
+                updateLastUsedTime();
+            };
+        }
+
+        // Update last used timestamp
+        function updateLastUsedTime() {
+            const lastUsed = localStorage.getItem('lastUsed') || 'Never';
+            lastUsedTime.textContent = `Last used: ${lastUsed}`;
+        }
+
+        // Save product to IndexedDB
+        function saveProduct(name, quantity, barcode) {
+            const transaction = db.transaction(['products'], 'readwrite');
+            const objectStore = transaction.objectStore('products');
+            const dateAdded = new Date().toLocaleString();
+            const product = { name, quantity, barcode, dateAdded, lastUpdated: null };
+
+            const request = objectStore.add(product);
+            request.onsuccess = function() {
+                updateLastUsed(); // Update last used timestamp
+                loadProducts(); // Refresh product list
+            };
+        }
+
+        // Update existing product in IndexedDB
+        function updateProduct(productId, name, quantity, barcode) {
+            const transaction = db.transaction(['products'], 'readwrite');
+            const objectStore = transaction.objectStore('products');
+            const dateUpdated = new Date().toLocaleString();
+
+            const request = objectStore.get(productId);
+            request.onsuccess = function(event) {
+                const product = event.target.result;
+                product.name = name;
+                product.quantity = quantity;
+                product.barcode = barcode;
+                product.lastUpdated = dateUpdated;
+                objectStore.put(product);
+                loadProducts(); // Refresh product list
+            };
+        }
+
+        // Delete product from IndexedDB
+        function deleteProduct(productId) {
+            const transaction = db.transaction(['products'], 'readwrite');
+            const objectStore = transaction.objectStore('products');
+            objectStore.delete(productId);
+            loadProducts(); // Refresh product list
+        }
+
+        // Update the last used timestamp in localStorage
+        function updateLastUsed() {
+            const now = new Date().toLocaleString();
+            localStorage.setItem('lastUsed', now);
+            updateLastUsedTime(); // Update display
+        }
+
+        // Display entry records in the table
+        function displayRecords(products) {
+            entryRecords.innerHTML = ''; // Clear existing records
+            let totalQuantity = 0;
+
+            products.forEach((product, index) => {
+                const row = entryRecords.insertRow();
+                row.insertCell(0).textContent = String(index + 1).padStart(2, '0'); // SR. No.
+                row.insertCell(1).textContent = product.name;
+                row.insertCell(2).textContent = product.quantity;
+                totalQuantity += parseInt(product.quantity);
+                row.insertCell(3).textContent = product.barcode;
+                row.insertCell(4).textContent = product.dateAdded;
+                row.insertCell(5).textContent = product.lastUpdated || 'N/A';
+                
+                // Create action buttons
+                const actionsCell = row.insertCell(6);
+                const editButton = document.createElement('button');
+                editButton.textContent = 'Edit';
+                editButton.className = 'btn edit-btn';
+                editButton.onclick = () => requestPassword(() => editProduct(product.id));
+                
+                const deleteButton = document.createElement('button');
+                deleteButton.textContent = 'Delete';
+                deleteButton.className = 'btn delete-btn';
+                deleteButton.onclick = () => requestPassword(() => deleteProductEntry(product.id));
+                
+                actionsCell.appendChild(editButton);
+                actionsCell.appendChild(deleteButton);
+            });
+
+            totalQuantityCell.textContent = totalQuantity; // Update total quantity display
+        }
+
+        // Check for duplicate barcode
+        function isBarcodeDuplicate(barcode) {
+            const transaction = db.transaction(['products'], 'readonly');
+            const objectStore = transaction.objectStore('products');
+            const request = objectStore.index('barcode').get(barcode);
+            return new Promise((resolve) => {
+                request.onsuccess = function(event) {
+                    resolve(event.target.result !== undefined);
+                };
+            });
+        }
+
+        function requestPassword(action) {
+            const enteredPassword = prompt('Please enter the password to proceed:');
+            if (enteredPassword === PASSWORD) {
+                action();
+            } else {
+                alert('Incorrect password. Action denied.');
+            }
+        }
+
+        async function editProduct(productId) {
+            const transaction = db.transaction(['products'], 'readonly');
+            const objectStore = transaction.objectStore('products');
+            const request = objectStore.get(productId);
+
+            request.onsuccess = async function(event) {
+                const product = event.target.result;
+                document.getElementById('productName').value = product.name;
+                document.getElementById('quantity').value = product.quantity;
+                document.getElementById('barcode').value = product.barcode;
+
+                // Update form submission to handle editing
+                productForm.onsubmit = async function(event) {
+                    event.preventDefault();
+                    const productName = document.getElementById('productName').value;
+                    const quantity = document.getElementById('quantity').value;
+                    const barcode = document.getElementById('barcode').value;
+
+                    // Check for duplicate barcode
+                    if (await isBarcodeDuplicate(barcode)) {
+                        errorMessage.textContent = 'Error: This barcode already exists. Please enter a unique barcode.';
+                        errorMessage.style.display = 'block';
+                        return; // Stop submission if duplicate found
+                    }
+
+                    errorMessage.style.display = 'none'; // Clear error message if no duplicate
+
+                    updateProduct(productId, productName, quantity, barcode);
+                    productForm.reset();
+                    productForm.onsubmit = originalSubmit; // Restore original submit handler
+                };
+            };
+        }
+
+        function deleteProductEntry(productId) {
+            if (confirm('Are you sure you want to delete this entry?')) {
+                deleteProduct(productId);
+            }
+        }
+
+        // Reset all data
+        resetButton.onclick = function() {
+            requestPassword(() => {
+                if (confirm('Are you sure you want to reset all data? This action cannot be undone.')) {
+                    const transaction = db.transaction(['products'], 'readwrite');
+                    const objectStore = transaction.objectStore('products');
+                    objectStore.clear(); // Clear products from IndexedDB
+                    localStorage.removeItem('lastUsed'); // Clear last used timestamp
+                    productForm.reset(); // Reset the form fields
+                    productList.innerHTML = ''; // Clear the datalist options
+                    displayRecords([]); // Clear the records displayed in the table
+                    lastUsedTime.textContent = 'Last used: Never'; // Reset last used display
+                }
+            });
+        };
+
+        productForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const productName = document.getElementById('productName').value;
+            const quantity = document.getElementById('quantity').value;
+            const barcode = document.getElementById('barcode').value;
+
+            // Check for duplicate barcode
+            if (await isBarcodeDuplicate(barcode)) {
+                errorMessage.textContent = 'Error: This barcode already exists. Please enter a unique barcode.';
+                errorMessage.style.display = 'block';
+                return; // Stop submission if duplicate found
+            }
+
+            errorMessage.style.display = 'none'; // Clear error message if no duplicate
+
+            saveProduct(productName, quantity, barcode);
+            productForm.reset();
+            productList.innerHTML = ''; // Clear existing options to refresh
+        });
+
+        // Print Records
+        printButton.onclick = function() {
+            const printContent = document.getElementById('entryRecords').outerHTML;
+            const newWindow = window.open('', '', 'height=600,width=800');
+            newWindow.document.write('<html><head><title>Print Records</title>');
+            newWindow.document.write('<style>table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #ccc; padding: 10px; text-align: left; } th { background-color: #f8f8f8; }</style></head>');
+            newWindow.document.write('<body>');
+            newWindow.document.write('<h1>Product Records</h1>');
+            newWindow.document.write(printContent);
+            newWindow.document.write('</body></html>');
+            newWindow.document.close();
+            newWindow.print();
+        };
+
+        // Initialize the database
+        initDB();
+        setInterval(updateDateTime, 1000); // Update date and time every second
+    </script>
+
+</body>
+</html>
